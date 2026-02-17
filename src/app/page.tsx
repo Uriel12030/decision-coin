@@ -1,181 +1,284 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 
-interface Decision {
-  optionA: string;
-  optionB: string;
-  result: string;
-  timestamp: string;
-}
-
-const STORAGE_KEY = "decision-coin-history";
-
-function loadHistory(): Decision[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
+// Mandelbrot iteration: returns iteration count or maxIter if in set
+function mandelbrot(cx: number, cy: number, maxIter: number): number {
+  let zx = 0;
+  let zy = 0;
+  let i = 0;
+  while (zx * zx + zy * zy <= 4 && i < maxIter) {
+    const tmp = zx * zx - zy * zy + cx;
+    zy = 2 * zx * zy + cy;
+    zx = tmp;
+    i++;
   }
+  // Smooth coloring
+  if (i < maxIter) {
+    const log2 = Math.log(2);
+    const nu = Math.log(Math.log(zx * zx + zy * zy) / log2) / log2;
+    return i + 1 - nu;
+  }
+  return maxIter;
 }
 
-function saveHistory(history: Decision[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+// HSL to RGB conversion
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+  return [
+    Math.round((r + m) * 255),
+    Math.round((g + m) * 255),
+    Math.round((b + m) * 255),
+  ];
 }
+
+function getColor(iter: number, maxIter: number): [number, number, number] {
+  if (iter >= maxIter) return [0, 0, 0];
+  const hue = (iter * 8) % 360;
+  const sat = 0.8;
+  const light = 0.5;
+  return hslToRgb(hue, sat, light);
+}
+
+interface ViewState {
+  centerX: number;
+  centerY: number;
+  zoom: number;
+  maxIter: number;
+}
+
+const INITIAL_VIEW: ViewState = {
+  centerX: -0.5,
+  centerY: 0,
+  zoom: 3.5,
+  maxIter: 100,
+};
 
 export default function Home() {
-  const [optionA, setOptionA] = useState("");
-  const [optionB, setOptionB] = useState("");
-  const [result, setResult] = useState<string | null>(null);
-  const [errorA, setErrorA] = useState(false);
-  const [errorB, setErrorB] = useState(false);
-  const [history, setHistory] = useState<Decision[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [view, setView] = useState<ViewState>(INITIAL_VIEW);
+  const [rendering, setRendering] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef<{ x: number; y: number; cx: number; cy: number } | null>(null);
 
-  useEffect(() => {
-    setHistory(loadHistory());
-  }, []);
+  const render = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-  function handleDecide() {
-    const emptyA = optionA.trim() === "";
-    const emptyB = optionB.trim() === "";
-    setErrorA(emptyA);
-    setErrorB(emptyB);
+    setRendering(true);
 
-    if (emptyA || emptyB) {
-      setResult(null);
-      return;
+    const width = canvas.width;
+    const height = canvas.height;
+    const imageData = ctx.createImageData(width, height);
+    const data = imageData.data;
+
+    const { centerX, centerY, zoom, maxIter } = view;
+    const aspect = width / height;
+    const xMin = centerX - (zoom / 2) * aspect;
+    const yMin = centerY - zoom / 2;
+    const xStep = (zoom * aspect) / width;
+    const yStep = zoom / height;
+
+    for (let py = 0; py < height; py++) {
+      const cy = yMin + py * yStep;
+      for (let px = 0; px < width; px++) {
+        const cx = xMin + px * xStep;
+        const iter = mandelbrot(cx, cy, maxIter);
+        const [r, g, b] = getColor(iter, maxIter);
+        const idx = (py * width + px) * 4;
+        data[idx] = r;
+        data[idx + 1] = g;
+        data[idx + 2] = b;
+        data[idx + 3] = 255;
+      }
     }
 
-    const chosen = Math.random() < 0.5 ? optionA.trim() : optionB.trim();
-    setResult(chosen);
+    ctx.putImageData(imageData, 0, 0);
+    setRendering(false);
+  }, [view]);
 
-    const entry: Decision = {
-      optionA: optionA.trim(),
-      optionB: optionB.trim(),
-      result: chosen,
-      timestamp: new Date().toLocaleString(),
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const resizeCanvas = () => {
+      const container = canvas.parentElement;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      // Limit resolution for performance
+      const scale = Math.min(dpr, 1.5);
+      canvas.width = Math.floor(rect.width * scale);
+      canvas.height = Math.floor(rect.height * scale);
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
     };
 
-    const updated = [entry, ...history];
-    setHistory(updated);
-    saveHistory(updated);
-  }
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+    return () => window.removeEventListener("resize", resizeCanvas);
+  }, []);
 
-  function clearHistory() {
-    setHistory([]);
-    localStorage.removeItem(STORAGE_KEY);
-  }
+  useEffect(() => {
+    render();
+  }, [render]);
+
+  // Convert pixel position to complex plane coordinates
+  const pixelToComplex = useCallback(
+    (px: number, py: number): { cx: number; cy: number } => {
+      const canvas = canvasRef.current;
+      if (!canvas) return { cx: 0, cy: 0 };
+      const rect = canvas.getBoundingClientRect();
+      const x = ((px - rect.left) / rect.width) * canvas.width;
+      const y = ((py - rect.top) / rect.height) * canvas.height;
+      const aspect = canvas.width / canvas.height;
+      const cx = view.centerX - (view.zoom / 2) * aspect + (x / canvas.width) * view.zoom * aspect;
+      const cy = view.centerY - view.zoom / 2 + (y / canvas.height) * view.zoom;
+      return { cx, cy };
+    },
+    [view]
+  );
+
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 1.3 : 1 / 1.3;
+      const { cx, cy } = pixelToComplex(e.clientX, e.clientY);
+
+      setView((prev) => {
+        const newZoom = prev.zoom * factor;
+        // Keep the point under the cursor fixed
+        const newCenterX = cx - (cx - prev.centerX) * factor;
+        const newCenterY = cy - (cy - prev.centerY) * factor;
+        // Increase iterations when zoomed in
+        const newMaxIter = Math.max(100, Math.floor(100 + 50 * Math.log2(INITIAL_VIEW.zoom / newZoom)));
+        return {
+          centerX: newCenterX,
+          centerY: newCenterY,
+          zoom: newZoom,
+          maxIter: newMaxIter,
+        };
+      });
+    },
+    [pixelToComplex]
+  );
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button === 0) {
+        setIsDragging(true);
+        dragStart.current = {
+          x: e.clientX,
+          y: e.clientY,
+          cx: view.centerX,
+          cy: view.centerY,
+        };
+      }
+    },
+    [view.centerX, view.centerY]
+  );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isDragging || !dragStart.current) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const dx = e.clientX - dragStart.current.x;
+      const dy = e.clientY - dragStart.current.y;
+      const aspect = canvas.width / canvas.height;
+
+      setView((prev) => ({
+        ...prev,
+        centerX: dragStart.current!.cx - (dx / rect.width) * prev.zoom * aspect,
+        centerY: dragStart.current!.cy - (dy / rect.height) * prev.zoom,
+      }));
+    },
+    [isDragging]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+    dragStart.current = null;
+  }, []);
+
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      const { cx, cy } = pixelToComplex(e.clientX, e.clientY);
+      const factor = e.shiftKey ? 3 : 1 / 3;
+      setView((prev) => {
+        const newZoom = prev.zoom * factor;
+        const newMaxIter = Math.max(100, Math.floor(100 + 50 * Math.log2(INITIAL_VIEW.zoom / newZoom)));
+        return {
+          centerX: cx,
+          centerY: cy,
+          zoom: newZoom,
+          maxIter: newMaxIter,
+        };
+      });
+    },
+    [pixelToComplex]
+  );
+
+  const handleReset = () => setView(INITIAL_VIEW);
 
   return (
-    <div className="flex min-h-screen flex-col items-center bg-zinc-50 px-4 py-16 font-sans dark:bg-black">
-      <div className="w-full max-w-md">
-        <h1 className="mb-8 text-center text-4xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          Decision Coin
+    <div className="flex h-screen w-screen flex-col bg-black" dir="rtl">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4 py-2">
+        <h1 className="text-lg font-bold text-zinc-100">
+          Mandelbrot Set Viewer
         </h1>
-
-        <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <div className="mb-4">
-            <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Option A
-            </label>
-            <input
-              type="text"
-              value={optionA}
-              onChange={(e) => {
-                setOptionA(e.target.value);
-                if (e.target.value.trim()) setErrorA(false);
-              }}
-              placeholder="e.g. Pizza"
-              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors ${
-                errorA
-                  ? "border-red-500 focus:border-red-500"
-                  : "border-zinc-300 focus:border-zinc-900 dark:border-zinc-700 dark:focus:border-zinc-400"
-              } bg-white text-zinc-900 placeholder-zinc-400 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500`}
-            />
-            {errorA && (
-              <p className="mt-1 text-xs text-red-500">Please enter Option A</p>
-            )}
-          </div>
-
-          <div className="mb-6">
-            <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Option B
-            </label>
-            <input
-              type="text"
-              value={optionB}
-              onChange={(e) => {
-                setOptionB(e.target.value);
-                if (e.target.value.trim()) setErrorB(false);
-              }}
-              placeholder="e.g. Sushi"
-              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors ${
-                errorB
-                  ? "border-red-500 focus:border-red-500"
-                  : "border-zinc-300 focus:border-zinc-900 dark:border-zinc-700 dark:focus:border-zinc-400"
-              } bg-white text-zinc-900 placeholder-zinc-400 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500`}
-            />
-            {errorB && (
-              <p className="mt-1 text-xs text-red-500">Please enter Option B</p>
-            )}
-          </div>
-
+        <div className="flex items-center gap-4 text-xs text-zinc-400">
+          {rendering && <span className="text-yellow-400">...rendering</span>}
+          <span>
+            Zoom: {(INITIAL_VIEW.zoom / view.zoom).toFixed(1)}x
+          </span>
+          <span>
+            Iterations: {view.maxIter}
+          </span>
+          <span>
+            Center: ({view.centerX.toFixed(6)}, {view.centerY.toFixed(6)})
+          </span>
           <button
-            onClick={handleDecide}
-            className="w-full rounded-lg bg-zinc-900 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            onClick={handleReset}
+            className="rounded bg-zinc-700 px-2 py-1 text-zinc-200 transition-colors hover:bg-zinc-600"
           >
-            Decide
+            Reset
           </button>
-
-          {result && (
-            <div className="mt-6 rounded-xl bg-zinc-50 p-6 text-center dark:bg-zinc-800">
-              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                The coin says...
-              </p>
-              <p className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">
-                {result}
-              </p>
-            </div>
-          )}
         </div>
+      </div>
 
-        {history.length > 0 && (
-          <div className="mt-8">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                History
-              </h2>
-              <button
-                onClick={clearHistory}
-                className="text-xs text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-              >
-                Clear
-              </button>
-            </div>
-            <ul className="space-y-2">
-              {history.map((entry, i) => (
-                <li
-                  key={i}
-                  className="rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                      {entry.result}
-                    </span>
-                    <span className="text-xs text-zinc-400">
-                      {entry.timestamp}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                    {entry.optionA} vs {entry.optionB}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+      {/* Instructions */}
+      <div className="bg-zinc-900/80 px-4 py-1 text-center text-xs text-zinc-500">
+        Scroll to zoom | Drag to pan | Double-click to zoom in | Shift+double-click to zoom out
+      </div>
+
+      {/* Canvas */}
+      <div className="relative flex-1">
+        <canvas
+          ref={canvasRef}
+          className={`absolute inset-0 ${isDragging ? "cursor-grabbing" : "cursor-crosshair"}`}
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onDoubleClick={handleDoubleClick}
+          onContextMenu={(e) => e.preventDefault()}
+        />
       </div>
     </div>
   );
