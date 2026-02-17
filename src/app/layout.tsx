@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Decision Coin",
-  description: "Let the coin decide for you",
+  title: "Mandelbrot Set Viewer",
+  description: "Interactive Mandelbrot set fractal explorer",
 };
 
 export default function RootLayout({
