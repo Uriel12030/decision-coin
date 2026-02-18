@@ -2,18 +2,18 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Mandelbrot Set Viewer",
-  description: "Interactive Mandelbrot set fractal explorer",
+  title: "בדיקת תלוש שכר חינם",
+  description: "בדיקה חינמית של תלוש השכר שלך – בדוק אם מגיעים לך כספים",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="en">
-      <body className="antialiased">
+    <html lang="he" dir="rtl">
+      <body className="min-h-screen bg-gray-50 text-gray-900 antialiased">
         {children}
       </body>
     </html>

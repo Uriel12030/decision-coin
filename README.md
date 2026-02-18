@@ -1,36 +1,107 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Payroll Slip Check – בדיקת תלוש שכר חינם
 
-## Getting Started
+MVP web application for free payroll-slip screening. Leads fill out an intake wizard, upload documents, and receive a reference number. An admin panel lets staff review, score, and manage leads.
 
-First, run the development server:
+## Tech Stack
+
+- **Next.js 14** (App Router) + TypeScript
+- **Tailwind CSS**
+- **Supabase** (Postgres + Storage + Auth)
+- **Zod** validation
+- **Server Actions** for writes
+
+## Local Setup
+
+### 1. Clone & install
+
+```bash
+git clone <repo-url>
+cd payroll-check
+npm install
+```
+
+### 2. Supabase project
+
+1. Create a project at [supabase.com](https://supabase.com).
+2. Run the migration in `supabase/migrations/001_initial.sql` via the SQL Editor.
+3. Create a **private** Storage bucket named `lead-files`.
+4. Copy `.env.example` to `.env.local` and fill in your keys:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+```
+
+### 3. Storage bucket policy
+
+In the Supabase dashboard → Storage → `lead-files` → Policies:
+
+- **No public access** (keep default private).
+- Server actions use the **service role key** to upload, which bypasses RLS.
+- Admin download uses signed URLs generated server-side.
+
+### 4. Create an admin user
+
+In Supabase dashboard → Authentication → Users → "Add user" with email + password.
+
+### 5. Run
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploy to Vercel
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Push to GitHub.
+2. Import project in Vercel.
+3. Add environment variables in Vercel project settings.
+4. Deploy.
 
-## Learn More
+## Data Cleanup
 
-To learn more about Next.js, take a look at the following resources:
+Delete leads and files older than 60 days:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run cleanup
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Or run directly:
 
-## Deploy on Vercel
+```bash
+SUPABASE_SERVICE_ROLE_KEY=... NEXT_PUBLIC_SUPABASE_URL=... npx tsx scripts/cleanup-old-leads.ts
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Project Structure
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+src/
+  app/
+    page.tsx              Landing page
+    intake/page.tsx       Multi-step intake wizard
+    thank-you/page.tsx    Confirmation page
+    admin/
+      login/page.tsx      Admin login
+      leads/page.tsx      Leads list + filters
+      leads/[id]/page.tsx Lead detail + PDF export
+    api/
+      upload/route.ts     File upload endpoint
+      admin/case-pack/[id]/route.ts  PDF generation
+  lib/
+    types.ts              TypeScript interfaces
+    schemas.ts            Zod validation schemas
+    scoring.ts            Lead scoring engine
+    actions.ts            Server actions
+    supabase/
+      client.ts           Browser Supabase client
+      server.ts           Server Supabase clients
+  components/
+    intake/               Wizard steps
+    ui/                   Shared UI components
+supabase/
+  migrations/             SQL migrations
+scripts/
+  cleanup-old-leads.ts    Data retention script
+```
